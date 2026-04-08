@@ -22,8 +22,8 @@ The loop stops when you merge the PR to main.
 
 ```mermaid
 flowchart LR
-    A{Who created?}
-    A -->|Human| B{@claude in body?}
+    A{"Who created?"}
+    A -->|Human| B{"'@claude' in body?"}
     B -->|Yes| C[Fires]
     B -->|No| D[Skip]
     A -->|claude bot| C
