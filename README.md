@@ -3,6 +3,13 @@
 An infinite self-improving loop powered by [Claude Code Action](https://github.com/anthropics/claude-code-action).  
 Create one Issue -- Claude takes it from there.
 
+<p align="left">
+  <a href="https://github.com/anthropics/claude-code-action"><img src="https://img.shields.io/badge/Claude_Code_Action-191919?style=flat&logo=anthropic&logoColor=white" /></a>
+  <a href="https://docs.github.com/en/actions"><img src="https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat&logo=githubactions&logoColor=white" /></a>
+  <a href="https://www.anthropic.com/claude"><img src="https://img.shields.io/badge/Claude-D4A574?style=flat&logo=anthropic&logoColor=white" /></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green?style=flat" /></a>
+</p>
+
 ## How It Works
 
 ```
