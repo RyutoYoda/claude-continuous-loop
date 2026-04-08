@@ -1,0 +1,95 @@
+name: Claude Continuous Improvement
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude-code-action:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude')) ||
+      (github.event_name == 'issues' && github.event.issue.user.login == 'claude[bot]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Action
+        uses: anthropics/claude-code-action@beta
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          timeout_minutes: "60"
+
+          model: sonnet
+          allowed_bots: "claude[bot]"
+          allowed_tools: "Agent,Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm run build:*),Bash(npx tsc:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh issue:*)"
+
+          custom_instructions: |
+            CLAUDE.md を必ず読み、プロジェクトの規約に従ってください。
+
+            ## Issue駆動開発モード (Planner → Generator → Evaluator ハーネス)
+
+            Issueが作成された場合（event_name == 'issues'）、以下のループで開発を行ってください。
+            `.claude/agents/` にある専用エージェントを使います。
+
+            ### Step 1: ブランチ準備（重要！）
+            **絶対に Issue 番号入りの個別ブランチを作らないこと。**
+            必ず共有ブランチ `claude/continuous-improvement` を使う。全Issueのコミットを1つのブランチに積み上げる。
+            ```
+            git fetch origin
+            git checkout claude/continuous-improvement 2>/dev/null && git pull origin claude/continuous-improvement || git checkout -b claude/continuous-improvement
+            ```
+
+            ### Step 2: Planner（計画）— 初回のみ
+            `dev-planner-agent` を Agent ツールで呼び出す。
+            Issueのタイトルと本文を渡し、実装計画（仕様書）をJSON形式で受け取る。
+
+            ### Step 3: Generator → Evaluator ループ（実装と検証）
+            Plannerの出力に含まれる各ファイルについて `implementation_order` 順に：
+
+            1. `dev-generator-agent` を Agent ツールで呼び出し、1ファイルを作成/修正
+            2. `dev-evaluator-agent` を Agent ツールで呼び出し、結果を検証
+            3. Evaluatorが `fail` → フィードバックを添えて再度 Generator
+            4. **最大3回リトライ**しても不合格 → 問題点をメモして次のファイルへ
+
+            ### Step 4: ビルド検証
+            全ファイル完了後、ビルドチェック。エラーがあれば修正。
+
+            ### Step 5: コミット＆PR更新（重要！）
+            **必ず `claude/continuous-improvement` ブランチにpushすること。別ブランチは使わない。**
+            1. `git add -A` → `git commit -m "feat: <内容> #<Issue番号>"` → `git push origin claude/continuous-improvement`
+            2. PRが未作成か確認: `gh pr list --head claude/continuous-improvement --state open`
+               - PRがなければ: `gh pr create --base main --head claude/continuous-improvement --title "Claude 継続的改善" --body "継続的改善PR"`
+               - PRがあれば: `gh pr comment <PR番号> --body "Issue #<番号> の実装を追加"`
+            3. **自動マージはしない** — オーナーがレビューしてマージする
+
+            ### Step 6: 次の改善Issueを作成（無限ループ）
+            PR更新後、コードベースを調査して次に改善すべき点を1つ見つけ、新しいIssueを作成する。
+
+            1. `git log --oneline -10` で直近の変更を確認（同じ改善の繰り返しを避ける）
+            2. コードベースを読んで、バグ修正・UX改善・新機能のいずれかで価値の高い改善を1つ選ぶ
+            3. `gh issue create --title "タイトル" --body "本文"` でIssue作成（claude[bot]が作成したIssueは自動トリガーされる）
+            4. **必ず次のIssueを作成すること。スキップしない。** ループはオーナーがPRをマージするまで止めない。
+
+            注意:
+            - 変更ファイル5つ以内で完結するサイズの改善を選ぶ
+            - 今回の Issue と同じ領域の改善は避ける（多様性を持たせる）
+
+            ## @claude メンション対応
+            PRコメント等で @claude がメンションされた場合は柔軟に対応。

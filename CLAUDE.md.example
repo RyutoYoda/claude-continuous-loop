@@ -1,0 +1,49 @@
+# CLAUDE.md — Your Project Name
+
+## Project Overview
+
+<!-- プロジェクトの概要を記述 -->
+
+- **Frontend**:
+- **Backend**:
+- **Storage**:
+
+---
+
+## Directory Structure
+
+<!-- ディレクトリ構成を記述 -->
+
+```
+src/
+  ...
+```
+
+---
+
+## Development Commands
+
+```bash
+npm run dev       # 開発サーバー
+npm run build     # ビルド
+npm run test      # テスト
+```
+
+---
+
+## Important Rules
+
+<!-- プロジェクト固有の規約・注意点を記述 -->
+<!-- Claude はここを読んで実装の判断基準にします -->
+
+---
+
+## API Endpoints
+
+<!-- APIがあれば一覧を記述 -->
+
+---
+
+## Known Pitfalls
+
+<!-- よくある罠・注意点を記述 -->
