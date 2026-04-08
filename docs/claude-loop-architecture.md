@@ -3,41 +3,27 @@
 ## 全体フロー
 
 ```mermaid
-flowchart TD
-    A["Issue作成"] -->|"GitHub Events:<br/>issues.opened"| B{"誰が作成?"}
-    B -->|"人間 → @claude が本文に必要"| C["claude.yml ワークフロー起動"]
-    B -->|"claude[bot] → 無条件で発火"| C
-
-    C --> D["Step 1: ブランチ準備"]
-    D -->|"既にあれば checkout & pull"| E["claude/continuous-improvement"]
-    D -->|"なければ新規作成"| E
-
-    E --> F["Step 2: Planner<br/>dev-planner-agent"]
-    F -->|"実装計画 JSON"| G["Step 3: Generator → Evaluator ループ"]
-
-    G --> H["dev-generator-agent<br/>1ファイル実装"]
-    H --> I["dev-evaluator-agent<br/>検証"]
-    I -->|"pass"| J{次のファイル?}
-    I -->|"fail (最大3回)"| H
-    J -->|"あり"| H
-    J -->|"全完了"| K["Step 4: ビルド検証<br/>npx tsc --noEmit"]
-
-    K --> L["Step 5: commit & push<br/>claude/continuous-improvement"]
-    L --> M{"PRは既にある?"}
-    M -->|"No"| N["gh pr create<br/>'Claude 継続的改善'"]
-    M -->|"Yes"| O["gh pr comment<br/>変更概要を追記"]
-    N --> P["Step 6: 次の改善Issue作成<br/>必ず作成・スキップしない"]
-    O --> P
-
-    P --> Q["gh issue create"]
-    Q -->|"claude[bot]作成 → 自動トリガー"| A
+flowchart LR
+    A["🎫 Issue作成"] --> B["🔀 ブランチ準備<br/>claude/continuous-improvement"]
+    B --> C["📋 Planner<br/>実装計画"]
+    C --> D["⚙️ Generator<br/>1ファイル実装"]
+    D --> E["✅ Evaluator<br/>検証"]
+    E -->|"fail"| D
+    E -->|"pass"| F{"次のファイル?"}
+    F -->|"あり"| D
+    F -->|"全完了"| G["🔨 ビルド検証"]
+    G --> H["📦 commit & push<br/>→ 1つのPRに積み上げ"]
+    H --> I["🎫 次のIssue作成"]
+    I -->|"自動トリガー"| A
 
     style A fill:#7c6af7,color:#fff
+    style B fill:#2d6a4f,color:#fff
     style C fill:#1a1a2e,color:#fff
-    style E fill:#2d6a4f,color:#fff
-    style N fill:#c9a84c,color:#000
-    style O fill:#c9a84c,color:#000
-    style Q fill:#7c6af7,color:#fff
+    style D fill:#c9a84c,color:#000
+    style E fill:#c9a84c,color:#000
+    style G fill:#1a1a2e,color:#fff
+    style H fill:#2d6a4f,color:#fff
+    style I fill:#7c6af7,color:#fff
 ```
 
 ## トリガー条件
