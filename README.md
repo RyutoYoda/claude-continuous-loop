@@ -9,7 +9,7 @@ Create one Issue -- Claude takes it from there.
   <a href="https://www.anthropic.com/claude"><img src="https://img.shields.io/badge/Claude-D4A574?style=flat&logo=anthropic&logoColor=white" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green?style=flat" /></a>
 </p>
-
+<img width="1365" height="608" alt="スクリーンショット 2026-04-08 18 00 43" src="https://github.com/user-attachments/assets/2d176058-ebc3-44d9-b557-57b1101611b9" />
 ## How It Works
 
 ```
