@@ -1,96 +1,97 @@
 # Claude Continuous Improvement Loop
 
-Claude Code Action を使った**無限改善ループ**のテンプレートです。
-Issue を作成するだけで、Claude が自動的にコードを改善し続けます。
+An infinite self-improving loop powered by [Claude Code Action](https://github.com/anthropics/claude-code-action).  
+Create one Issue -- Claude takes it from there.
 
-## How it works
+## How It Works
 
 ```
-Issue作成 → Planner(計画) → Generator(実装) → Evaluator(検証)
-  → commit & push → 1つのPRに積み上げ → 次のIssue自動作成 → 繰り返し
+Issue -> Plan -> Implement -> Verify -> Commit -> Next Issue -> ...
 ```
 
-- 全ての改善が **1ブランチ・1PR** にコミットされ続ける
-- 開発者がPRをレビューしてマージするまで止まらない
-- `claude[bot]` が作成したIssueは自動トリガー（`@claude` 書き忘れでも止まらない）
+All improvements accumulate on one branch (`claude/continuous-improvement`) in a single PR.  
+The loop runs until you merge the PR to main.
 
-詳細なアーキテクチャ図は [docs/claude-loop-architecture.md](docs/claude-loop-architecture.md) を参照。
+**Key points:**
 
-## Setup
+- **Planner / Generator / Evaluator** agents ensure quality at every step
+- **Single PR** -- all changes stack on one branch, easy to review
+- **Never stops** -- each Issue triggers the next automatically
+- **Bot-proof** -- Issues created by `claude[bot]` fire without needing `@claude` in the body
+- **You stay in control** -- merge the PR whenever you're ready
 
-### 1. ファイルをコピー
+See [docs/architecture.md](docs/architecture.md) for diagrams.
+
+## Quick Start
+
+### 1. Copy files to your repo
 
 ```bash
-# このリポジトリの内容をあなたのプロジェクトにコピー
-cp -r .github/workflows/claude.yml <your-repo>/.github/workflows/
-cp -r .claude/ <your-repo>/.claude/
+cp -r .github <your-repo>/
+cp -r .claude <your-repo>/
 ```
 
-### 2. Claude GitHub App をインストール
+### 2. Install the Claude GitHub App
 
-[Claude GitHub App](https://github.com/apps/claude) をリポジトリにインストールしてください。
+Install [Claude for GitHub](https://github.com/apps/claude) on your repository.
 
-### 3. Secret を設定
+### 3. Add your secret
 
-GitHub リポジトリの Settings → Secrets and variables → Actions で以下を追加：
+Go to **Settings > Secrets and variables > Actions** and add:
 
-| Secret | 説明 |
-|--------|------|
-| `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code の OAuth トークン |
+| Secret | Description |
+|--------|-------------|
+| `CLAUDE_CODE_OAUTH_TOKEN` | Your Claude Code OAuth token |
 
-### 4. CLAUDE.md を作成
+### 4. Create a CLAUDE.md
 
-`CLAUDE.md.example` を参考に、あなたのプロジェクト用の `CLAUDE.md` を作成してください。
-Claude はこのファイルを読んでプロジェクトの規約を理解します。
+Use [`CLAUDE.md.example`](CLAUDE.md.example) as a starting point.  
+This file tells Claude about your project's structure, conventions, and rules.
 
-### 5. ループ開始
+### 5. Start the loop
 
-Issue を作成して本文に `@claude` を含めるだけ！
+Create an Issue with `@claude` in the body:
 
 ```
-タイトル: ボタンの色を変更する
-本文: ヘッダーのボタンの色を青から緑に変更してください。 @claude
+Title: Add dark mode toggle
+Body:  Add a dark mode toggle button to the header. @claude
 ```
 
 ## File Structure
 
 ```
 .github/workflows/
-  claude.yml                  # ワークフロー定義（トリガー・Step 1-6）
+  claude.yml                  # Workflow definition (triggers, Steps 1-6)
 
 .claude/agents/
-  dev-planner-agent.md        # Step 2: 実装計画を作成
-  dev-generator-agent.md      # Step 3: 1ファイルずつコード実装
-  dev-evaluator-agent.md      # Step 3: 実装結果を検証
+  dev-planner-agent.md        # Analyze issue, create implementation plan
+  dev-generator-agent.md      # Implement one file at a time
+  dev-evaluator-agent.md      # Verify implementation quality
 
 docs/
-  claude-loop-architecture.md # アーキテクチャ図（Mermaid）
+  architecture.md             # Architecture diagrams (Mermaid)
 
-CLAUDE.md.example             # プロジェクト設定のテンプレート
+CLAUDE.md.example             # Template for your project config
 ```
 
-## Customization
+## Configuration
 
-### allowed_tools
+Edit `.github/workflows/claude.yml` to customize:
 
-`claude.yml` の `allowed_tools` をプロジェクトに合わせて変更してください：
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `model` | `sonnet` | Claude model (`sonnet`, `opus`) |
+| `timeout_minutes` | `60` | Max runtime per Issue |
+| `allowed_tools` | See workflow | Tools Claude can use |
+| `allowed_bots` | `claude[bot]` | Bots allowed to trigger the workflow |
 
-```yaml
-allowed_tools: "Agent,Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm run build:*),Bash(npx tsc:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh issue:*)"
-```
+## Stopping and Restarting
 
-### timeout_minutes
-
-デフォルトは60分。大きなタスクが多い場合は増やしてください。
-
-### model
-
-デフォルトは `sonnet`。`opus` に変更するとより高品質な実装が期待できます。
-
-## Stopping the Loop
-
-PRを main にマージすると、ブランチが削除されてループが停止します。
-再開したい場合は、新しい Issue を `@claude` 付きで作成してください。
+| Action | How |
+|--------|-----|
+| **Stop** | Merge the PR to main |
+| **Restart** | Create a new Issue with `@claude` in the body |
+| **Pause** | Close the latest open Issue created by claude[bot] |
 
 ## License
 

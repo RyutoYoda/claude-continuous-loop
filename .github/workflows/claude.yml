@@ -41,55 +41,55 @@ jobs:
           allowed_tools: "Agent,Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm run build:*),Bash(npx tsc:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh issue:*)"
 
           custom_instructions: |
-            CLAUDE.md を必ず読み、プロジェクトの規約に従ってください。
+            Always read CLAUDE.md first and follow the project conventions.
 
-            ## Issue駆動開発モード (Planner → Generator → Evaluator ハーネス)
+            ## Issue-Driven Development (Planner -> Generator -> Evaluator Harness)
 
-            Issueが作成された場合（event_name == 'issues'）、以下のループで開発を行ってください。
-            `.claude/agents/` にある専用エージェントを使います。
+            When an Issue is created (event_name == 'issues'), follow this loop.
+            Use the specialized agents in `.claude/agents/`.
 
-            ### Step 1: ブランチ準備（重要！）
-            **絶対に Issue 番号入りの個別ブランチを作らないこと。**
-            必ず共有ブランチ `claude/continuous-improvement` を使う。全Issueのコミットを1つのブランチに積み上げる。
+            ### Step 1: Branch Setup (IMPORTANT)
+            **Never create per-issue branches.** Always use the shared branch `claude/continuous-improvement`.
+            All commits from all Issues must stack on this single branch.
             ```
             git fetch origin
             git checkout claude/continuous-improvement 2>/dev/null && git pull origin claude/continuous-improvement || git checkout -b claude/continuous-improvement
             ```
 
-            ### Step 2: Planner（計画）— 初回のみ
-            `dev-planner-agent` を Agent ツールで呼び出す。
-            Issueのタイトルと本文を渡し、実装計画（仕様書）をJSON形式で受け取る。
+            ### Step 2: Planner (first time only)
+            Invoke `dev-planner-agent` via the Agent tool.
+            Pass the Issue title and body. Receive an implementation plan in JSON.
 
-            ### Step 3: Generator → Evaluator ループ（実装と検証）
-            Plannerの出力に含まれる各ファイルについて `implementation_order` 順に：
+            ### Step 3: Generator -> Evaluator Loop
+            For each file in the plan's `implementation_order`:
 
-            1. `dev-generator-agent` を Agent ツールで呼び出し、1ファイルを作成/修正
-            2. `dev-evaluator-agent` を Agent ツールで呼び出し、結果を検証
-            3. Evaluatorが `fail` → フィードバックを添えて再度 Generator
-            4. **最大3回リトライ**しても不合格 → 問題点をメモして次のファイルへ
+            1. Invoke `dev-generator-agent` to create/modify one file
+            2. Invoke `dev-evaluator-agent` to verify the result
+            3. If Evaluator returns `fail`, retry Generator with the feedback
+            4. After **3 retries** still failing, note the issue and move to the next file
 
-            ### Step 4: ビルド検証
-            全ファイル完了後、ビルドチェック。エラーがあれば修正。
+            ### Step 4: Build Verification
+            After all files are done, run a build check. Fix any errors.
 
-            ### Step 5: コミット＆PR更新（重要！）
-            **必ず `claude/continuous-improvement` ブランチにpushすること。別ブランチは使わない。**
-            1. `git add -A` → `git commit -m "feat: <内容> #<Issue番号>"` → `git push origin claude/continuous-improvement`
-            2. PRが未作成か確認: `gh pr list --head claude/continuous-improvement --state open`
-               - PRがなければ: `gh pr create --base main --head claude/continuous-improvement --title "Claude 継続的改善" --body "継続的改善PR"`
-               - PRがあれば: `gh pr comment <PR番号> --body "Issue #<番号> の実装を追加"`
-            3. **自動マージはしない** — オーナーがレビューしてマージする
+            ### Step 5: Commit and PR Update (IMPORTANT)
+            **Always push to `claude/continuous-improvement`. Never use a different branch.**
+            1. `git add -A` -> `git commit -m "feat: <summary> #<issue-number>"` -> `git push origin claude/continuous-improvement`
+            2. Check if a PR exists: `gh pr list --head claude/continuous-improvement --state open`
+               - If no PR: `gh pr create --base main --head claude/continuous-improvement --title "Claude Continuous Improvement" --body "Continuous improvement PR"`
+               - If PR exists: `gh pr comment <pr-number> --body "Added implementation for Issue #<number>"`
+            3. **Do not auto-merge.** The owner will review and merge.
 
-            ### Step 6: 次の改善Issueを作成（無限ループ）
-            PR更新後、コードベースを調査して次に改善すべき点を1つ見つけ、新しいIssueを作成する。
+            ### Step 6: Create Next Improvement Issue (Infinite Loop)
+            After updating the PR, investigate the codebase and find the next improvement.
 
-            1. `git log --oneline -10` で直近の変更を確認（同じ改善の繰り返しを避ける）
-            2. コードベースを読んで、バグ修正・UX改善・新機能のいずれかで価値の高い改善を1つ選ぶ
-            3. `gh issue create --title "タイトル" --body "本文"` でIssue作成（claude[bot]が作成したIssueは自動トリガーされる）
-            4. **必ず次のIssueを作成すること。スキップしない。** ループはオーナーがPRをマージするまで止めない。
+            1. Run `git log --oneline -10` to check recent changes (avoid repeating the same improvements)
+            2. Read the codebase and pick one valuable improvement (bug fix, UX improvement, or new feature)
+            3. `gh issue create --title "Title" --body "Description"` (Issues created by claude[bot] are auto-triggered)
+            4. **Always create the next Issue. Never skip.** The loop only stops when the owner merges the PR.
 
-            注意:
-            - 変更ファイル5つ以内で完結するサイズの改善を選ぶ
-            - 今回の Issue と同じ領域の改善は避ける（多様性を持たせる）
+            Guidelines:
+            - Keep each improvement to 5 files or fewer
+            - Pick a different area than the current Issue (maintain diversity)
 
-            ## @claude メンション対応
-            PRコメント等で @claude がメンションされた場合は柔軟に対応。
+            ## @claude Mention Handling
+            When @claude is mentioned in PR comments, respond flexibly.
