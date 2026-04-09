@@ -1,6 +1,6 @@
 # Claude Continuous Improvement Loop
 
-An infinite self-improving loop powered by [Claude Code Action](https://github.com/anthropics/claude-code-action).  
+An infinite self-improving loop powered by [Claude Code Action](https://github.com/anthropics/claude-code-action).
 Create one Issue -- Claude takes it from there.
 
 <p align="left">
@@ -14,21 +14,25 @@ Create one Issue -- Claude takes it from there.
 ## How It Works
 
 ```
-Issue -> Plan -> Implement -> Verify -> Commit -> Next Issue -> ...
+Issue -> [Script] Branch + PR -> [Planner] -> [Generator] -> [Evaluator] -> [Script] Build Check -> Next Issue -> ...
 ```
 
-All improvements accumulate on one branch (`claude/continuous-improvement`) in a single PR.  
-The loop runs until you merge the PR to main.
+Critical steps (branch/PR creation, build verification) are handled by **shell scripts** -- not prompts.
+Intellectual work (planning, implementation, code review) is handled by **sub-agents**.
 
-**Key points:**
-
-- **Planner / Generator / Evaluator** agents ensure quality at every step
-- **Single PR** -- all changes stack on one branch, easy to review
-- **Never stops** -- each Issue triggers the next automatically
-- **Bot-proof** -- Issues created by `claude[bot]` fire without needing `@claude` in the body
-- **You stay in control** -- merge the PR whenever you're ready
+Each Issue gets its own branch and PR (1:1:1). Review and merge individually.
 
 See [docs/architecture.md](docs/architecture.md) for diagrams.
+
+### Sub-Agents
+
+| Agent | Role |
+|-------|------|
+| **Planner** | Reads the issue, investigates the codebase, outputs an implementation plan |
+| **Generator** | Implements one file at a time based on the plan |
+| **Evaluator** | Reviews the implementation, returns pass/fail with feedback |
+
+Generator and Evaluator loop until each file passes (max 3 retries).
 
 ## Quick Start
 
@@ -51,25 +55,33 @@ Go to **Settings > Secrets and variables > Actions** and add:
 |--------|-------------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | Your Claude Code OAuth token |
 
-### 4. Create a CLAUDE.md
+### 4. Enable PR creation for Actions
 
-Use [`CLAUDE.md.example`](CLAUDE.md.example) as a starting point.  
+Go to **Settings > Actions > General > Workflow permissions** and enable
+"Allow GitHub Actions to create and approve pull requests".
+
+### 5. Create a CLAUDE.md
+
+Use [`CLAUDE.md.example`](CLAUDE.md.example) as a starting point.
 This file tells Claude about your project's structure, conventions, and rules.
 
-### 5. Start the loop
+### 6. Start the loop
 
-Create an Issue with `@claude` in the body:
+Create an Issue with `@claude` at the start of the body:
 
 ```
 Title: Add dark mode toggle
-Body:  Add a dark mode toggle button to the header. @claude
+Body:
+@claude
+
+Add a dark mode toggle button to the header.
 ```
 
 ## File Structure
 
 ```
 .github/workflows/
-  claude.yml                  # Workflow definition (triggers, Steps 1-6)
+  claude.yml                  # Workflow: scripts + Claude action + sub-agents
 
 .claude/agents/
   dev-planner-agent.md        # Analyze issue, create implementation plan
@@ -82,6 +94,19 @@ docs/
 CLAUDE.md.example             # Template for your project config
 ```
 
+## What the workflow does
+
+| Step | Type | What happens |
+|------|------|-------------|
+| 1. Checkout | Script | Clone the repo |
+| 2. Create branch + PR | Script | Guaranteed. Also injects `@claude` if missing |
+| 3. Planner | Sub-agent | Analyzes issue, outputs implementation plan |
+| 4. Generator/Evaluator | Sub-agents | Implements and verifies each file |
+| 5. Build check (Claude) | Claude | Runs build command, fixes errors |
+| 6. Commit + push | Claude | Pushes to the PR branch |
+| 7. Next Issue | Claude | Creates the next improvement issue |
+| 8. Build verification | Script | Guaranteed. Posts result to PR |
+
 ## Configuration
 
 Edit `.github/workflows/claude.yml` to customize:
@@ -91,15 +116,13 @@ Edit `.github/workflows/claude.yml` to customize:
 | `model` | `sonnet` | Claude model (`sonnet`, `opus`) |
 | `timeout_minutes` | `60` | Max runtime per Issue |
 | `allowed_tools` | See workflow | Tools Claude can use |
-| `allowed_bots` | `claude[bot]` | Bots allowed to trigger the workflow |
 
 ## Stopping and Restarting
 
 | Action | How |
 |--------|-----|
-| **Stop** | Merge the PR to main |
-| **Restart** | Create a new Issue with `@claude` in the body |
-| **Pause** | Close the latest open Issue created by claude[bot] |
+| **Stop** | Close the latest open Issue created by claude[bot] |
+| **Restart** | Create a new Issue with `@claude` at the start of the body |
 
 ## License
 
