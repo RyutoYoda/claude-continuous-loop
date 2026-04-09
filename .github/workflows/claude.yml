@@ -30,7 +30,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Guaranteed by script: create branch, inject @claude, open PR
+      # Script: create branch + inject @claude + open PR
       - name: Create branch and PR
         if: github.event_name == 'issues'
         env:
@@ -57,7 +57,7 @@ jobs:
             --title "feat: ${ISSUE_TITLE}" \
             --body "Closes #${ISSUE_NUMBER}"
 
-      # Claude: plan, implement, verify, commit, create next issue
+      # Claude: plan, implement, verify, commit (does NOT create next issue)
       - name: Run Claude
         uses: anthropics/claude-code-action@beta
         with:
@@ -65,7 +65,7 @@ jobs:
           timeout_minutes: "60"
           model: sonnet
           allowed_bots: "claude[bot]"
-          allowed_tools: "Agent,Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm install:*),Bash(npm run build:*),Bash(npx tsc:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh issue:*)"
+          allowed_tools: "Agent,Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm install:*),Bash(npm run build:*),Bash(npx tsc:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*)"
 
           custom_instructions: |
             Read CLAUDE.md first and follow project conventions.
@@ -87,14 +87,10 @@ jobs:
 
             Step 4: Commit and push.
 
-            Step 5: Create the next improvement Issue.
-            - Run `git log --oneline -10` to avoid repeating recent work
-            - Pick a different area. Keep to 5 files or fewer
-            - Put `@claude` at the start of the body
-            - Always create the next Issue. Never skip.
+            Do NOT create the next Issue. The workflow script handles that after merge.
 
-      # Guaranteed by script: build verification + auto-merge
-      - name: Verify build and merge
+      # Script: build check -> merge -> create next issue (in this order)
+      - name: Verify, merge, and continue loop
         if: github.event_name == 'issues'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -110,9 +106,22 @@ jobs:
           PR_NUM=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number')
           if [ -z "$PR_NUM" ]; then exit 0; fi
 
-          if npm run build; then
-            gh pr comment "$PR_NUM" --body "Build passed. Auto-merging."
-            gh pr merge "$PR_NUM" --squash --delete-branch
-          else
+          # Build check
+          if ! npm run build; then
             gh pr comment "$PR_NUM" --body "Build FAILED. Manual review required."
+            exit 1
           fi
+
+          # Merge
+          gh pr comment "$PR_NUM" --body "Build passed. Auto-merging."
+          gh pr merge "$PR_NUM" --squash --delete-branch
+
+          # Only after merge succeeds: create next issue
+          gh issue create \
+            --title "Continuous improvement (auto)" \
+            --body "@claude
+
+          The previous improvement (#${ISSUE_NUMBER}) has been merged.
+          Investigate the codebase and implement the next valuable improvement.
+          Run git log --oneline -10 to avoid repeating recent work.
+          Pick a different area. Keep changes to 5 files or fewer."
