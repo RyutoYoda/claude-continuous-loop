@@ -25,35 +25,28 @@ jobs:
       issues: write
       id-token: write
     steps:
-      # 1. Checkout
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # 2. Ensure @claude tag + create branch + create PR (script, guaranteed)
+      # Guaranteed by script: create branch, inject @claude, open PR
       - name: Create branch and PR
         if: github.event_name == 'issues'
-        id: setup
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          # Prepend @claude if missing (bot-created issues may omit it)
           if ! echo "$ISSUE_BODY" | grep -q "@claude"; then
             gh issue edit "$ISSUE_NUMBER" --body "@claude
           $ISSUE_BODY"
-            echo "Added @claude to issue body"
           fi
 
           BRANCH="claude/issue-${ISSUE_NUMBER}"
-          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
-
           git config user.email "claude[bot]@users.noreply.github.com"
           git config user.name "claude[bot]"
-
           git checkout -b "$BRANCH"
           git commit --allow-empty -m "Start work on #${ISSUE_NUMBER}"
           git push origin "$BRANCH"
@@ -64,59 +57,50 @@ jobs:
             --title "feat: ${ISSUE_TITLE}" \
             --body "Closes #${ISSUE_NUMBER}"
 
-          echo "Branch and PR created for issue #${ISSUE_NUMBER}"
-
-      # 3. Claude implements the issue (Planner -> Generator -> Evaluator)
-      - name: Run Claude Code Action
+      # Claude: plan, implement, verify, commit, create next issue
+      - name: Run Claude
         uses: anthropics/claude-code-action@beta
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           timeout_minutes: "60"
-
           model: sonnet
           allowed_bots: "claude[bot]"
           allowed_tools: "Agent,Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm install:*),Bash(npm run build:*),Bash(npx tsc:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh issue:*)"
 
           custom_instructions: |
             Read CLAUDE.md first and follow project conventions.
-
-            When an Issue is created, implement it using the sub-agents
-            in `.claude/agents/`.
-            The branch and PR have already been created for you.
+            The branch and PR have already been created.
+            Use the sub-agents in `.claude/agents/`.
 
             Step 1: Planner
-            Invoke `dev-planner-agent` via the Agent tool.
+            Invoke `dev-planner-agent` via Agent tool.
             Pass the Issue title and body. Receive an implementation plan in JSON.
 
-            Step 2: Generator -> Evaluator Loop
+            Step 2: Generator / Evaluator loop
             For each file in the plan's implementation_order:
             1. Invoke `dev-generator-agent` to create/modify one file
-            2. Invoke `dev-evaluator-agent` to verify the result
-            3. If Evaluator returns fail, retry Generator with feedback
-            4. After 3 retries still failing, note the problem and move on
+            2. Invoke `dev-evaluator-agent` to verify
+            3. On fail, retry with feedback (max 3 times)
 
-            Step 3: Build Check
-            Run `npm install && npm run build`. Fix any errors.
+            Step 3: Build check
+            Run the project build command. Fix errors.
 
-            Step 4: Commit and push changes.
+            Step 4: Commit and push.
 
             Step 5: Create the next improvement Issue.
             - Run `git log --oneline -10` to avoid repeating recent work
-            - Pick a different area than the current Issue
-            - Keep it to 5 files or fewer
-            - Run `gh issue create` with `@claude` at the start of the body
+            - Pick a different area. Keep to 5 files or fewer
+            - Put `@claude` at the start of the body
             - Always create the next Issue. Never skip.
 
-      # 4. Build verification (script, guaranteed)
-      - name: Verify build
+      # Guaranteed by script: build verification + auto-merge
+      - name: Verify build and merge
         if: github.event_name == 'issues'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
           BRANCH="claude/issue-${ISSUE_NUMBER}"
-
-          # Re-authenticate for git
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           git fetch origin
           git checkout "$BRANCH" 2>/dev/null || exit 0
@@ -124,16 +108,11 @@ jobs:
 
           npm install --ignore-scripts
           PR_NUM=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number')
-          if [ -z "$PR_NUM" ]; then
-            echo "No PR found, skipping"
-            exit 0
-          fi
+          if [ -z "$PR_NUM" ]; then exit 0; fi
 
           if npm run build; then
-            echo "Build passed"
-            gh pr comment "$PR_NUM" --body "Build verification passed. Auto-merging."
+            gh pr comment "$PR_NUM" --body "Build passed. Auto-merging."
             gh pr merge "$PR_NUM" --squash --delete-branch
           else
-            echo "::warning::Build failed"
-            gh pr comment "$PR_NUM" --body "Build verification FAILED. Manual review required."
+            gh pr comment "$PR_NUM" --body "Build FAILED. Manual review required."
           fi

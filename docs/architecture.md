@@ -1,70 +1,57 @@
 # Architecture
 
-## Loop Flow
+## Flow
 
 ```mermaid
 flowchart LR
-    A[Issue] --> B[Script: Branch + PR] --> C[Planner] --> D[Generator]
+    A[Issue] --> B["Script:<br/>Branch + PR"]
+    B --> C[Planner]
+    C --> D[Generator]
     D --> E[Evaluator]
     E -->|fail| D
     E -->|pass| F{"More files?"}
     F -->|yes| D
-    F -->|done| G[Script: Build Check]
+    F -->|done| G["Script:<br/>Build + Merge"]
     G --> H[Next Issue]
     H --> A
 
-    style A fill:#7c6af7,color:#fff
     style B fill:#2d6a4f,color:#fff
     style G fill:#2d6a4f,color:#fff
-    style H fill:#7c6af7,color:#fff
 ```
 
-Green = guaranteed by shell scripts. Purple = triggers.
+Green = guaranteed by shell script.
 
-Each Issue gets its own branch and PR (1:1:1).
+## Script vs Agent responsibilities
 
-## What scripts guarantee vs what Claude handles
-
-| Step | Who | Guaranteed? |
-|------|-----|-------------|
-| Branch + PR creation | Shell script | Yes |
-| `@claude` tag injection | Shell script | Yes |
-| Planning | Planner sub-agent | Best effort |
-| Implementation | Generator sub-agent | Best effort |
-| Code review | Evaluator sub-agent | Best effort |
-| Build verification | Shell script | Yes |
+| Step | Owner | Guaranteed? |
+|------|-------|-------------|
+| Branch + PR creation | Script | Yes |
+| Inject `@claude` tag | Script | Yes |
+| Planning | Planner agent | Best effort |
+| Implementation | Generator agent | Best effort |
+| Code review | Evaluator agent | Best effort |
+| Build verification | Script | Yes |
+| Auto-merge on pass | Script | Yes |
 | Next Issue creation | Claude | Best effort |
 
-## Trigger Rules
+## Trigger rules
 
-```mermaid
-flowchart LR
-    A{"Who created?"}
-    A -->|Human| B{"'@claude' in body?"}
-    B -->|Yes| C[Fires]
-    B -->|No| D[Skip]
-    A -->|"claude[bot]"| E["Script prepends @claude"]
-    E --> C
+| Creator | Condition | Result |
+|---------|-----------|--------|
+| Human | `@claude` in body | Fires |
+| Human | No `@claude` | Skips |
+| claude[bot] | Any | Fires (script injects `@claude` if missing) |
 
-    style C fill:#2d6a4f,color:#fff
-    style D fill:#d62828,color:#fff
+## Branch strategy
+
+Each Issue gets one branch and one PR.
+
+```
+main
+  |- claude/issue-1  ->  PR #2  ->  merged
+  |- claude/issue-3  ->  PR #4  ->  merged
+  |- claude/issue-5  ->  PR #6  ->  merged
+  ...
 ```
 
-Bot-created Issues without `@claude` are patched automatically by the setup script.
-
-## Branch Strategy
-
-```mermaid
-gitGraph
-    commit id: "main"
-    branch claude/issue-1
-    commit id: "Issue #1"
-    checkout main
-    branch claude/issue-2
-    commit id: "Issue #2"
-    checkout main
-    branch claude/issue-3
-    commit id: "Issue #3"
-```
-
-Each Issue = one branch = one PR. Review and merge individually.
+Build passes: auto-merged (squash). Build fails: left open for manual review.
