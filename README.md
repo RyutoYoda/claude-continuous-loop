@@ -1,7 +1,7 @@
 # Claude Continuous Improvement Loop
 
 An infinite self-improving loop powered by [Claude Code Action](https://github.com/anthropics/claude-code-action).
-Create one Issue -- Claude takes it from there.
+Create one Issue — Claude takes it from there.
 
 <p align="left">
   <a href="https://github.com/anthropics/claude-code-action"><img src="https://img.shields.io/badge/Claude_Code_Action-191919?style=flat&logo=anthropic&logoColor=white" /></a>
@@ -14,14 +14,12 @@ Create one Issue -- Claude takes it from there.
 ## How it works
 
 ```
-Issue -> [Script] Branch + PR -> Planner -> Generator -> Evaluator -> [Claude] Next Issue -> [Script] Build + Merge -> ...
+Issue -> Planner -> Generator -> Evaluator -> [Claude] PR create + merge + Next Issue -> ...
 ```
 
-Critical steps run as **shell scripts** (branch/PR creation, build verification, auto-merge).
-Planning, implementation, and code review run as **sub-agents** (Planner, Generator, Evaluator).
-Next Issue creation is done by **Claude** (actor=`claude[bot]`), which triggers the next cycle.
+Claude handles the full cycle: planning, implementation, build verification, PR creation, merge, and next Issue creation — all as `claude[bot]`.
 
-Each Issue gets its own branch and PR. Build passes: auto-merged. Build fails: Claude fixes it (max 3 retries).
+Each Issue gets its own branch and PR. Build fix failures are handled by the `fix` job (max 3 retries).
 
 See [docs/architecture.md](docs/architecture.md) for diagrams.
 
@@ -63,24 +61,30 @@ Create an Issue with `@claude` at the start of the body.
 ## File structure
 
 ```
-.github/workflows/claude.yml       # Workflow (scripts + Claude + sub-agents)
-.claude/agents/dev-planner-agent.md # Plans implementation from Issue
+.github/workflows/claude.yml        # Workflow (implement + fix jobs)
+.claude/agents/dev-planner-agent.md  # Plans implementation from Issue
 .claude/agents/dev-generator-agent.md # Implements one file at a time
 .claude/agents/dev-evaluator-agent.md # Verifies implementation quality
-CLAUDE.md.example                   # Template for project config
+CLAUDE.md.example                    # Template for project config
 ```
 
 ## What each step does
 
-| # | Step | Type | Description |
-|---|------|------|-------------|
-| 1 | Branch + PR | Script | Creates branch and PR. Injects `@claude` if missing. |
-| 2 | Planner | Agent | Analyzes issue, outputs implementation plan. |
-| 3 | Generator | Agent | Implements one file at a time. |
-| 4 | Evaluator | Agent | Reviews implementation. Retries on fail (max 3). |
-| 5 | Next Issue | Claude | Creates next improvement issue (actor=`claude[bot]`). |
-| 6 | Build check | Script | Runs build. Pass: auto-merge. Fail: `@claude` comment on PR. |
-| 7 | Build fix | Claude + Script | Claude fixes, script re-checks. Max 3 retries, then close PR. |
+| # | Step | Who | Description |
+|---|------|-----|-------------|
+| 1 | Inject @claude | Script | Ensures `@claude` is in the issue body. |
+| 2 | Planner | Claude (sub-agent) | Analyzes issue, outputs implementation plan. |
+| 3 | Generator | Claude (sub-agent) | Implements one file at a time. |
+| 4 | Evaluator | Claude (sub-agent) | Reviews implementation. Retries on fail (max 3). |
+| 5 | Build check | Claude | Runs build command. Fixes errors. |
+| 6 | Commit + push | Claude | Commits and pushes to branch. |
+| 7 | PR create + merge | Claude | Creates PR and merges it as `claude[bot]`. |
+| 8 | Next Issue | Claude | Creates next improvement issue as `claude[bot]`, triggering the next cycle. |
+| 9 | Build fix (if needed) | Claude + Script | On PR comment `@claude`, Claude fixes and script re-merges. Max 3 retries. |
+
+## Why Claude creates the PR, merges, and creates the next Issue
+
+`GITHUB_TOKEN` cannot trigger new workflow runs on the same repository (GitHub's recursion prevention). Claude performs these actions as `claude[bot]`, which is a different actor and correctly triggers the next cycle.
 
 ## Configuration
 
@@ -94,7 +98,7 @@ CLAUDE.md.example                   # Template for project config
 
 | Action | How |
 |--------|-----|
-| Stop | Close the latest open Issue |
+| Stop | Close the latest open Issue (before Claude creates the next one) |
 | Restart | Create a new Issue with `@claude` |
 
 ## License
