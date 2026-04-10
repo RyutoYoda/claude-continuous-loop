@@ -40,7 +40,7 @@ jobs:
           $ISSUE_BODY"
           fi
 
-      # Claude: plan, implement, verify, commit, create next issue
+      # Claude: plan, implement, verify, commit
       # claude-code-action creates its own branch automatically
       - name: Run Claude
         uses: anthropics/claude-code-action@beta
@@ -70,13 +70,9 @@ jobs:
 
             Step 4: Commit and push.
 
-            Step 5: Create the next improvement Issue.
-            - Run `git log --oneline -10` to avoid repeating recent work
-            - Pick a different area. Keep to 5 files or fewer
-            - Put `@claude` at the start of the body
-            - Always create the next Issue. Never skip.
+            Do NOT create the next Issue — the system handles that automatically after merge.
 
-      # Script: find Claude's branch -> build check -> create PR -> merge
+      # Script: find Claude's branch -> build check -> create PR -> merge -> create next issue
       - name: Verify build and merge
         if: github.event_name == 'issues'
         env:
@@ -131,6 +127,19 @@ jobs:
           # Merge
           gh pr comment "$PR_NUM" --body "Build passed. Auto-merging."
           gh pr merge "$PR_NUM" --squash --delete-branch
+
+          # Create next issue AFTER merge to avoid race condition
+          git fetch origin main
+          RECENT_LOG=$(git log --oneline origin/main -10)
+          ISSUE_BODY="@claude
+
+          Recent commits (avoid duplicating these):
+          ${RECENT_LOG}
+
+          Based on the above, pick one improvement not yet implemented and implement it. Keep changes to 5 files or fewer."
+          printf '%b' "$ISSUE_BODY" | gh issue create \
+            --title "Continuous improvement: next enhancement" \
+            --body-file -
 
   # Job 2: PR comment @claude -> Claude fixes -> re-build -> merge
   fix:
