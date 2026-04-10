@@ -11,7 +11,7 @@ on:
     types: [submitted]
 
 jobs:
-  # Job 1: Issue -> branch + PR -> Claude implements -> build check -> merge -> next issue
+  # Job 1: Issue -> branch + PR -> Claude implements -> build check -> merge
   implement:
     if: |
       (github.event_name == 'issues' && contains(github.event.issue.body, '@claude')) ||
@@ -54,7 +54,7 @@ jobs:
             --title "feat: ${ISSUE_TITLE}" \
             --body "Closes #${ISSUE_NUMBER}"
 
-      # Claude: plan, implement, verify, commit (does NOT create next issue)
+      # Claude: plan, implement, verify, commit, create next issue
       - name: Run Claude
         uses: anthropics/claude-code-action@beta
         with:
@@ -62,7 +62,7 @@ jobs:
           timeout_minutes: "60"
           model: sonnet
           allowed_bots: "claude[bot]"
-          allowed_tools: "Agent,Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm install:*),Bash(npm run build:*),Bash(npx tsc:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*)"
+          allowed_tools: "Agent,Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm install:*),Bash(npm run build:*),Bash(npx tsc:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh issue:*)"
 
           custom_instructions: |
             Read CLAUDE.md first and follow project conventions.
@@ -84,10 +84,14 @@ jobs:
 
             Step 4: Commit and push.
 
-            Do NOT create the next Issue. The workflow script handles that after merge.
+            Step 5: Create the next improvement Issue.
+            - Run `git log --oneline -10` to avoid repeating recent work
+            - Pick a different area. Keep to 5 files or fewer
+            - Put `@claude` at the start of the body
+            - Always create the next Issue. Never skip.
 
-      # Script: build check -> merge -> next issue (or ask Claude to fix on failure)
-      - name: Verify, merge, and continue loop
+      # Script: build check -> merge (or ask Claude to fix on failure)
+      - name: Verify and merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
@@ -102,7 +106,6 @@ jobs:
           PR_NUM=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number')
           if [ -z "$PR_NUM" ]; then exit 0; fi
 
-          # Build fails -> comment on PR to trigger fix job
           if ! npm run build 2>&1 | tee /tmp/build-output.txt; then
             BUILD_ERROR=$(tail -30 /tmp/build-output.txt)
             gh pr comment "$PR_NUM" --body "@claude Build failed. Fix the following errors:
@@ -113,23 +116,13 @@ jobs:
             exit 0
           fi
 
-          # Build passes -> merge -> create next issue
           gh pr comment "$PR_NUM" --body "Build passed. Auto-merging."
           gh pr merge "$PR_NUM" --squash --delete-branch
 
-          gh issue create \
-            --title "Continuous improvement (auto)" \
-            --body "@claude
-
-          The previous improvement (#${ISSUE_NUMBER}) has been merged.
-          Investigate the codebase and implement the next valuable improvement.
-          Run git log --oneline -10 to avoid repeating recent work.
-          Pick a different area. Keep changes to 5 files or fewer."
-
-  # Job 2: PR comment @claude -> Claude fixes -> re-build -> merge -> next issue
+  # Job 2: PR comment @claude -> Claude fixes -> re-build -> merge
   fix:
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))
     runs-on: ubuntu-latest
@@ -151,7 +144,7 @@ jobs:
           timeout_minutes: "30"
           model: sonnet
           allowed_bots: "claude[bot]"
-          allowed_tools: "Agent,Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm install:*),Bash(npm run build:*),Bash(npx tsc:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*)"
+          allowed_tools: "Agent,Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm install:*),Bash(npm run build:*),Bash(npx tsc:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh issue:*)"
 
           custom_instructions: |
             Read CLAUDE.md first and follow project conventions.
@@ -159,8 +152,8 @@ jobs:
             Run the project build command and confirm it passes.
             Commit and push.
 
-      # Script: re-build -> merge -> next issue (or ask Claude to fix again)
-      - name: Re-verify, merge, and continue loop
+      # Script: re-build -> merge (or ask Claude to fix again, max 3 times)
+      - name: Re-verify and merge
         if: github.event.issue.pull_request || github.event.pull_request
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -173,7 +166,6 @@ jobs:
 
           BRANCH=$(gh pr view "$PR_NUM" --json headRefName --jq '.headRefName')
           if [ -z "$BRANCH" ]; then exit 0; fi
-          ISSUE_NUMBER=$(echo "$BRANCH" | grep -o '[0-9]*')
 
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           git fetch origin
@@ -181,6 +173,15 @@ jobs:
           git pull origin "$BRANCH" || true
 
           npm install --ignore-scripts
+
+          # Max 3 build failures -> close PR
+          FAIL_COUNT=$(gh pr view "$PR_NUM" --comments --json comments --jq '[.comments[].body | select(contains("Build") and contains("failed"))] | length')
+          if [ "$FAIL_COUNT" -ge 3 ]; then
+            gh pr comment "$PR_NUM" --body "Build failed 3 times. Closing PR."
+            gh pr close "$PR_NUM"
+            exit 0
+          fi
+
           if ! npm run build 2>&1 | tee /tmp/build-output.txt; then
             BUILD_ERROR=$(tail -30 /tmp/build-output.txt)
             gh pr comment "$PR_NUM" --body "@claude Build still failing. Fix these errors:
@@ -193,12 +194,3 @@ jobs:
 
           gh pr comment "$PR_NUM" --body "Build passed. Auto-merging."
           gh pr merge "$PR_NUM" --squash --delete-branch
-
-          gh issue create \
-            --title "Continuous improvement (auto)" \
-            --body "@claude
-
-          The previous improvement (#${ISSUE_NUMBER}) has been merged.
-          Investigate the codebase and implement the next valuable improvement.
-          Run git log --oneline -10 to avoid repeating recent work.
-          Pick a different area. Keep changes to 5 files or fewer."

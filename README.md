@@ -9,18 +9,19 @@ Create one Issue -- Claude takes it from there.
   <a href="https://www.anthropic.com/claude"><img src="https://img.shields.io/badge/Claude-D4A574?style=flat&logo=anthropic&logoColor=white" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green?style=flat" /></a>
 </p>
-<img width="1365" height="608" alt="スクリーンショット 2026-04-08 18 00 43" src="https://github.com/user-attachments/assets/2d176058-ebc3-44d9-b557-57b1101611b9" />
+<img width="1365" height="608" alt="Screenshot" src="https://github.com/user-attachments/assets/2d176058-ebc3-44d9-b557-57b1101611b9" />
 
 ## How it works
 
 ```
-Issue -> [Script] Branch + PR -> Planner -> Generator -> Evaluator -> [Script] Build + Auto-merge -> Next Issue -> ...
+Issue -> [Script] Branch + PR -> Planner -> Generator -> Evaluator -> [Claude] Next Issue -> [Script] Build + Merge -> ...
 ```
 
 Critical steps run as **shell scripts** (branch/PR creation, build verification, auto-merge).
-Planning, implementation, and code review run as **sub-agents**.
+Planning, implementation, and code review run as **sub-agents** (Planner, Generator, Evaluator).
+Next Issue creation is done by **Claude** (actor=`claude[bot]`), which triggers the next cycle.
 
-Each Issue gets its own branch and PR. Build passes: auto-merged. Build fails: left for manual review.
+Each Issue gets its own branch and PR. Build passes: auto-merged. Build fails: Claude fixes it (max 3 retries).
 
 See [docs/architecture.md](docs/architecture.md) for diagrams.
 
@@ -77,8 +78,9 @@ CLAUDE.md.example                   # Template for project config
 | 2 | Planner | Agent | Analyzes issue, outputs implementation plan. |
 | 3 | Generator | Agent | Implements one file at a time. |
 | 4 | Evaluator | Agent | Reviews implementation. Retries on fail (max 3). |
-| 5 | Build + Merge | Script | Runs build. Pass: auto-merge. Fail: comment on PR. |
-| 6 | Next Issue | Claude | Creates next improvement issue. Loop continues. |
+| 5 | Next Issue | Claude | Creates next improvement issue (actor=`claude[bot]`). |
+| 6 | Build check | Script | Runs build. Pass: auto-merge. Fail: `@claude` comment on PR. |
+| 7 | Build fix | Claude + Script | Claude fixes, script re-checks. Max 3 retries, then close PR. |
 
 ## Configuration
 
