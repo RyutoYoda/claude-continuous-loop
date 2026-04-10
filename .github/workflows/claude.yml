@@ -1,4 +1,4 @@
-name: Claude Continuous Improvement
+name: Claude PR Assistant
 
 on:
   issue_comment:
@@ -11,7 +11,7 @@ on:
     types: [submitted]
 
 jobs:
-  # Job 1: Issue -> Claude implements -> build check -> PR -> merge
+  # Job 1: Issue -> Claude が実装 + PR作成 + マージ + 次のIssue作成まで一貫して行う
   implement:
     if: |
       (github.event_name == 'issues' && contains(github.event.issue.body, '@claude')) ||
@@ -28,7 +28,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Script: inject @claude if missing (bot-created issues)
+      # Script: @claude が無ければ追記
       - name: Inject @claude if missing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -40,8 +40,7 @@ jobs:
           $ISSUE_BODY"
           fi
 
-      # Claude: plan, implement, verify, commit
-      # claude-code-action creates its own branch automatically
+      # Claude: 実装からIssue作成まで一貫して実行
       - name: Run Claude
         uses: anthropics/claude-code-action@beta
         with:
@@ -49,99 +48,38 @@ jobs:
           timeout_minutes: "60"
           model: sonnet
           allowed_bots: "claude[bot]"
-          allowed_tools: "Agent,Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm install:*),Bash(npm run build:*),Bash(npx tsc:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh issue:*)"
+          allowed_tools: "Agent,Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm install:*),Bash(npm run build:*),Bash(npx tsc:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh issue:*),Bash(git log:*)"
 
           custom_instructions: |
-            Read CLAUDE.md first and follow project conventions.
-            Use the sub-agents in `.claude/agents/`.
+            日本語で回答してください。
+            CLAUDE.md を必ず読み、プロジェクトの規約に従ってください。
 
-            Step 1: Planner
-            Invoke `dev-planner-agent` via Agent tool.
-            Pass the Issue title and body. Receive an implementation plan in JSON.
+            Issueが作成された場合、以下の手順で実装してください。
+            `.claude/agents/` にある専用サブエージェントを使います。
 
-            Step 2: Generator / Evaluator loop
-            For each file in the plan's implementation_order:
-            1. Invoke `dev-generator-agent` to create/modify one file
-            2. Invoke `dev-evaluator-agent` to verify
-            3. On fail, retry with feedback (max 3 times)
+            Step 1: Planner（設計）
+            `dev-planner-agent` を Agent ツールで呼び出す。
+            Issueのタイトルと本文を渡し、実装計画をJSON形式で受け取る。
 
-            Step 3: Build check
-            Run the project build command. Fix errors.
+            Step 2: Generator → Evaluator ループ（実装と検証）
+            Plannerの出力に含まれる各ファイルについて implementation_order 順に:
+            1. `dev-generator-agent` を Agent ツールで呼び出し、1ファイルを作成/修正
+            2. `dev-evaluator-agent` を Agent ツールで呼び出し、実装結果を検証
+            3. Evaluator が fail → フィードバックを添えて再度 Generator（最大3回）
 
-            Step 4: Commit and push.
+            Step 3: ビルド検証
+            npm install && npm run build でビルドチェック。エラーがあれば修正。
 
-            Do NOT create the next Issue — the system handles that automatically after merge.
+            Step 4: 変更をコミットしてプッシュする。
 
-      # Script: find Claude's branch -> build check -> create PR -> merge -> create next issue
-      - name: Verify build and merge
-        if: github.event_name == 'issues'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-        run: |
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
-          git fetch origin
+            Step 5: PRを作成してマージし、次のIssueを作成する。
+            変更がある場合のみ以下を実行する（変更がなければStep 5はスキップ）:
+            1. `gh pr create --base main --title "feat: <Issue タイトル>" --body "Closes #<Issue番号>"` でPRを作成
+            2. `gh pr merge <PR番号> --squash --delete-branch` でマージ
+            3. マージ確認後、`git log --oneline -10` で直近コミットを確認
+            4. `gh issue create --title "継続的改善: 次の機能改善" --body "@claude\n\n直近のコミット（重複を避けること）:\n<git logの出力>\n\n上記を踏まえ、まだ実施していない改善を1つ選んで実装してください。変更は5ファイル以内にしてください。"` で次のIssueを作成
 
-          # Find the branch Claude created (latest claude/issue-XX-*)
-          BRANCH=$(git branch -r --sort=-committerdate | grep "claude/issue-${ISSUE_NUMBER}" | head -1 | sed 's|origin/||' | xargs)
-          if [ -z "$BRANCH" ]; then
-            echo "No branch found for issue ${ISSUE_NUMBER}"
-            exit 0
-          fi
-          echo "Found branch: $BRANCH"
-
-          git checkout "$BRANCH"
-
-          # Skip if branch has no changes
-          DIFF=$(git diff --stat origin/main)
-          if [ -z "$DIFF" ]; then
-            echo "No changes on branch, skipping"
-            exit 0
-          fi
-
-          npm install --ignore-scripts
-
-          # Create PR if it doesn't exist
-          PR_NUM=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number')
-          if [ -z "$PR_NUM" ]; then
-            ISSUE_TITLE=$(gh issue view "$ISSUE_NUMBER" --json title --jq '.title')
-            gh pr create \
-              --base main \
-              --head "$BRANCH" \
-              --title "feat: ${ISSUE_TITLE}" \
-              --body "Closes #${ISSUE_NUMBER}"
-            PR_NUM=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number')
-          fi
-
-          # Build check
-          if ! npm run build 2>&1 | tee /tmp/build-output.txt; then
-            BUILD_ERROR=$(tail -30 /tmp/build-output.txt)
-            gh pr comment "$PR_NUM" --body "@claude Build failed. Fix these errors:
-
-          \`\`\`
-          ${BUILD_ERROR}
-          \`\`\`"
-            exit 0
-          fi
-
-          # Merge
-          gh pr comment "$PR_NUM" --body "Build passed. Auto-merging."
-          gh pr merge "$PR_NUM" --squash --delete-branch
-
-          # Create next issue AFTER merge to avoid race condition
-          git fetch origin main
-          RECENT_LOG=$(git log --oneline origin/main -10)
-          ISSUE_BODY="@claude
-
-          Recent commits (avoid duplicating these):
-          ${RECENT_LOG}
-
-          Based on the above, pick one improvement not yet implemented and implement it. Keep changes to 5 files or fewer."
-          printf '%b' "$ISSUE_BODY" | gh issue create \
-            --title "Continuous improvement: next enhancement" \
-            --body-file -
-
-  # Job 2: PR comment @claude -> Claude fixes -> re-build -> merge
+  # Job 2: PRコメントで @claude → Claude修正 → 再ビルド → マージ
   fix:
     if: |
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@claude')) ||
@@ -169,12 +107,13 @@ jobs:
           allowed_tools: "Agent,Read,Write,Edit,MultiEdit,Glob,Grep,Bash(npm install:*),Bash(npm run build:*),Bash(npx tsc:*),Bash(git checkout:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr:*),Bash(gh issue:*)"
 
           custom_instructions: |
-            Read CLAUDE.md first and follow project conventions.
-            Fix the reported problem.
-            Run the project build command and confirm it passes.
-            Commit and push.
+            日本語で回答してください。
+            CLAUDE.md を必ず読み、プロジェクトの規約に従ってください。
+            指摘された問題を修正してください。
+            npm install && npm run build でビルドが通ることを確認してください。
+            修正したらコミットしてプッシュしてください。
 
-      # Script: re-build -> merge (max 3 retries, then close PR)
+      # Script: 再ビルド検証 → マージ
       - name: Re-verify and merge
         if: github.event.issue.pull_request || github.event.pull_request
         env:
@@ -196,7 +135,7 @@ jobs:
 
           npm install --ignore-scripts
 
-          # Max 3 build failures -> close PR
+          # 3回失敗したらPRを閉じる
           FAIL_COUNT=$(gh pr view "$PR_NUM" --comments --json comments --jq '[.comments[].body | select(contains("Build") and contains("failed"))] | length')
           if [ "$FAIL_COUNT" -ge 3 ]; then
             gh pr comment "$PR_NUM" --body "Build failed 3 times. Closing PR."
