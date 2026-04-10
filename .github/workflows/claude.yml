@@ -11,7 +11,7 @@ on:
     types: [submitted]
 
 jobs:
-  # Job 1: Issue -> branch + PR -> Claude implements -> build check -> merge
+  # Job 1: Issue -> Claude implements -> build check -> PR -> merge
   implement:
     if: |
       (github.event_name == 'issues' && contains(github.event.issue.body, '@claude')) ||
@@ -28,12 +28,11 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Script: create branch + inject @claude + open PR
-      - name: Create branch and PR
+      # Script: inject @claude if missing (bot-created issues)
+      - name: Inject @claude if missing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
           if ! echo "$ISSUE_BODY" | grep -q "@claude"; then
@@ -41,20 +40,8 @@ jobs:
           $ISSUE_BODY"
           fi
 
-          BRANCH="claude/issue-${ISSUE_NUMBER}"
-          git config user.email "claude[bot]@users.noreply.github.com"
-          git config user.name "claude[bot]"
-          git checkout -b "$BRANCH"
-          git commit --allow-empty -m "Start work on #${ISSUE_NUMBER}"
-          git push origin "$BRANCH"
-
-          gh pr create \
-            --base main \
-            --head "$BRANCH" \
-            --title "feat: ${ISSUE_TITLE}" \
-            --body "Closes #${ISSUE_NUMBER}"
-
       # Claude: plan, implement, verify, commit, create next issue
+      # claude-code-action creates its own branch automatically
       - name: Run Claude
         uses: anthropics/claude-code-action@beta
         with:
@@ -66,7 +53,6 @@ jobs:
 
           custom_instructions: |
             Read CLAUDE.md first and follow project conventions.
-            The branch and PR have already been created.
             Use the sub-agents in `.claude/agents/`.
 
             Step 1: Planner
@@ -90,25 +76,51 @@ jobs:
             - Put `@claude` at the start of the body
             - Always create the next Issue. Never skip.
 
-      # Script: build check -> merge (or ask Claude to fix on failure)
-      - name: Verify and merge
+      # Script: find Claude's branch -> build check -> create PR -> merge
+      - name: Verify build and merge
+        if: github.event_name == 'issues'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          BRANCH="claude/issue-${ISSUE_NUMBER}"
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           git fetch origin
-          git checkout "$BRANCH" 2>/dev/null || exit 0
-          git pull origin "$BRANCH" || true
+
+          # Find the branch Claude created (latest claude/issue-XX-*)
+          BRANCH=$(git branch -r --sort=-committerdate | grep "claude/issue-${ISSUE_NUMBER}" | head -1 | sed 's|origin/||' | xargs)
+          if [ -z "$BRANCH" ]; then
+            echo "No branch found for issue ${ISSUE_NUMBER}"
+            exit 0
+          fi
+          echo "Found branch: $BRANCH"
+
+          git checkout "$BRANCH"
+
+          # Skip if branch has no changes
+          DIFF=$(git diff --stat origin/main)
+          if [ -z "$DIFF" ]; then
+            echo "No changes on branch, skipping"
+            exit 0
+          fi
 
           npm install --ignore-scripts
-          PR_NUM=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number')
-          if [ -z "$PR_NUM" ]; then exit 0; fi
 
+          # Create PR if it doesn't exist
+          PR_NUM=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number')
+          if [ -z "$PR_NUM" ]; then
+            ISSUE_TITLE=$(gh issue view "$ISSUE_NUMBER" --json title --jq '.title')
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "feat: ${ISSUE_TITLE}" \
+              --body "Closes #${ISSUE_NUMBER}"
+            PR_NUM=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number')
+          fi
+
+          # Build check
           if ! npm run build 2>&1 | tee /tmp/build-output.txt; then
             BUILD_ERROR=$(tail -30 /tmp/build-output.txt)
-            gh pr comment "$PR_NUM" --body "@claude Build failed. Fix the following errors:
+            gh pr comment "$PR_NUM" --body "@claude Build failed. Fix these errors:
 
           \`\`\`
           ${BUILD_ERROR}
@@ -116,6 +128,7 @@ jobs:
             exit 0
           fi
 
+          # Merge
           gh pr comment "$PR_NUM" --body "Build passed. Auto-merging."
           gh pr merge "$PR_NUM" --squash --delete-branch
 
@@ -152,7 +165,7 @@ jobs:
             Run the project build command and confirm it passes.
             Commit and push.
 
-      # Script: re-build -> merge (or ask Claude to fix again, max 3 times)
+      # Script: re-build -> merge (max 3 retries, then close PR)
       - name: Re-verify and merge
         if: github.event.issue.pull_request || github.event.pull_request
         env:
